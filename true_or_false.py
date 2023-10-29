@@ -4,7 +4,7 @@
 
 a = 256
 b = 256
-a is b
+print (a is b)
  
 
 # 2. When we set `a = 257` and `b = 257`, they are no longer within the range of cached 
@@ -13,4 +13,4 @@ a is b
 
 a = 257
 b = 257
-a is b
+print (a is b)
