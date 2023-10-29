@@ -33,6 +33,11 @@ def tune_hyperparameters(train_ds, test_ds):
     return study.best_trial.params
 
 def main():
+    try:
+ # Load the data, pre-process it, tune the hyperparameters, train the model, evaluate the model, and write the results to submission.csv.
+        ...
+    except Exception as e:
+        print(e)
     # Load the data.
     train_df = pd.read_csv("train.csv")
     test_df = pd.read_csv("test.csv")
@@ -50,6 +55,14 @@ def main():
     # Evaluate the model on the test set.
     accuracy = evaluate_model(model, test_ds)
     print("Accuracy:", accuracy)
+    
+    # Write results to submission.csv
+    submission_df = pd.DataFrame({
+        "PassengerId": test_df["PassengerId"],
+        "Survived": (model.predict(test_ds, verbose=0)[:, 0] >= 0.5).astype(int)
+    })
+    submission_df.to_csv("submission.csv", index=False)
+    print("Results written to submission.csv")
 
 if __name__ == "__main__":
     main()
