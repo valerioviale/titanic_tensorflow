@@ -1,103 +1,63 @@
-import numpy as np
+import optuna
+import tensorflow as tf
+import tensorflow_decision_forests as tfdf
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
 
-def load_data():
-    """Loads the Titanic training and test data.
+def preprocess(df):
+    # TODO: Implement your preprocessing steps here.
+    return df
 
-    Returns:
-        A tuple of (train_df, test_df), where train_df is a Pandas DataFrame
-        containing the training data and test_df is a Pandas DataFrame containing
-        the test data.
-    """
-
-    train_df = pd.read_csv("train.csv")
-    test_df = pd.read_csv("test.csv")
-
-    return train_df, test_df
-
-def preprocess_data(train_df, test_df):
-    """Preprocesses the Titanic training and test data.
-
-    Args:
-        train_df: A Pandas DataFrame containing the training data.
-        test_df: A Pandas DataFrame containing the test data.
-
-    Returns:
-        A tuple of (X_train, X_test, y_train), where X_train and X_test are
-        NumPy arrays containing the preprocessed training and test data, respectively,
-        and y_train is a NumPy array containing the training labels.
-    """
-
-    # Fill in missing values.
-    train_df["Age"] = train_df["Age"].fillna(train_df["Age"].mean())
-    test_df["Age"] = test_df["Age"].fillna(test_df["Age"].mean())
-
-    # Encode categorical features.
-    categorical_features = ["Sex", "Embarked"]
-    for feature in categorical_features:
-        train_df[feature] = train_df[feature].astype("category")
-        test_df[feature] = test_df[feature].astype("category")
-        train_df[feature] = train_df[feature].cat.codes
-        test_df[feature] = test_df[feature].cat.codes
-
-    # Split the training data into features and labels.
-    X_train = train_df.drop("Survived", axis=1)
-    y_train = train_df["Survived"]
-
-    # Return the preprocessed data.
-    return X_train, test_df, y_train
-
-def train_model(X_train, y_train):
-    """Trains a Random Forest Classifier model on the Titanic training data.
-
-    Args:
-        X_train: A NumPy array containing the preprocessed training data.
-        y_train: A NumPy array containing the training labels.
-
-    Returns:
-        A trained Random Forest Classifier model.
-    """
-
-    model = RandomForestClassifier(n_estimators=100, max_depth=5)
-    model.fit(X_train, y_train)
-
+def train_model(train_ds, hyperparameters):
+    model = tfdf.keras.GradientBoostedTreesModel(**hyperparameters)
+    model.fit(train_ds)
     return model
 
-def predict(model, X_test):
-    """Predicts the survival probabilities of the passengers in the test data.
+def evaluate_model(model, test_ds):
+    predictions = model.predict(test_ds, verbose=0)[:, 0]
+    accuracy = (predictions >= 0.5).astype(int) == test_ds["Survived"]
+    return accuracy.mean()
 
-    Args:
-        model: A trained Random Forest Classifier model.
-        X_test: A NumPy array containing the preprocessed test data.
+def tune_hyperparameters(train_ds, test_ds):
+    def objective(trial):
+        trial.suggest_int("num_trees", 100, 1000, log=True)
+        trial.suggest_int("max_depth", 3, 8, log=True)
+        trial.suggest_float("shrinkage", 0.01, 0.1)
 
-    Returns:
-        A NumPy array containing the predicted survival probabilities of the
-        passengers in the test data.
-    """
+        model = train_model(train_ds, trial.params)
+        accuracy = evaluate_model(model, test_ds)
+        return accuracy
 
-    y_pred = model.predict_proba(X_test)[:, 1]
+    study = optuna.create_study()
+    study.optimize(objective, n_trials=100)
 
-    return y_pred
+    return study.best_trial.params
 
 def main():
     # Load the data.
-    train_df, test_df = load_data()
+    train_df = pd.read_csv("train.csv")
+    test_df = pd.read_csv("test.csv")
 
     # Preprocess the data.
-    X_train, X_test, y_train = preprocess_data(train_df, test_df)
+    train_ds = tfdf.keras.pd_dataframe_to_tf_dataset(preprocess(train_df))
+    test_ds = tfdf.keras.pd_dataframe_to_tf_dataset(preprocess(test_df))
 
-    # Train the model.
-    model = train_model(X_train, y_train)
+    # Tune the hyperparameters.
+    hyperparameters = tune_hyperparameters(train_ds, test_ds)
 
-    # Make predictions on the test data.
-    y_pred = predict(model, X_test)
+    # Train the model with the best hyperparameters.
+    model = train_model(train_ds, hyperparameters)
 
-    # Calculate the accuracy on the test data.
-    accuracy = np.mean(y_pred > 0.5 == y_train)
-
-    # Print the accuracy.
+    # Evaluate the model on the test set.
+    accuracy = evaluate_model(model, test_ds)
     print("Accuracy:", accuracy)
 
 if __name__ == "__main__":
     main()
+    
+    # Write results to submission.csv
+    submission_df = pd.DataFrame({
+        "PassengerId": test_df["PassengerId"],
+        "Survived": (model.predict(test_ds, verbose=0)[:, 0] >= 0.5).astype(int)
+    })
+    submission_df.to_csv("submission.csv", index=False)
+    print("Results written to submission.csv")
