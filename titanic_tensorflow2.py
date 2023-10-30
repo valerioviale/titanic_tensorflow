@@ -1,65 +1,84 @@
 import numpy as np
 import pandas as pd
 import os
+
 import tensorflow as tf
 import tensorflow_decision_forests as tfdf
 
-# Define file paths as constants
-TRAIN_CSV_PATH = "train.csv"
-TEST_CSV_PATH = "test.csv"
-SUBMISSION_PATH = "submission.csv"
+print(f"Found TF-DF {tfdf.__version__}")
 
-# Function to preprocess data
-def preprocess_data(df):
+# Load the data
+train_df = pd.read_csv("train.csv")
+serving_df = pd.read_csv("test.csv")
+
+# Preprocessing function
+def preprocess(df):
     df = df.copy()
-    # Your preprocessing code here
+
+    # Normalize names
+    def normalize_name(x):
+        return " ".join([v.strip(",()[].\"'") for v in x.split(" ")])
+    
+    # Extract ticket number
+    def ticket_number(x):
+        return x.split()[-1]
+
+    # Extract ticket item
+    def ticket_item(x):
+        items = x.split()
+        if len(items) == 1:
+            return "NONE"
+        return "_".join(items[:-1])
+
+    df["Name"] = df["Name"].apply(normalize_name)
+    df["Ticket_number"] = df["Ticket"].apply(ticket_number)
+    df["Ticket_item"] = df["Ticket"].apply(ticket_item)
+
     return df
 
-# Function to train a model
-def train_model(train_ds):
-    model = tfdf.keras.GradientBoostedTreesModel(
-        verbose=0,
-        features=[tfdf.keras.FeatureUsage(name=n) for n in input_features],
-        exclude_non_specified_features=True,
-        random_seed=1234
-    )
-    model.fit(train_ds)
-    return model
+# Preprocess the data
+preprocessed_train_df = preprocess(train_df)
+preprocessed_serving_df = preprocess(serving_df)
 
-# Function to make predictions
-def make_predictions(model, serving_ds):
+# Define input features
+input_features = list(preprocessed_train_df.columns)
+input_features.remove("Ticket")
+input_features.remove("PassengerId")
+input_features.remove("Survived")
+
+# Tokenize names
+def tokenize_names(features, labels=None):
+    features["Name"] = tf.strings.split(features["Name"])
+    return features, labels
+
+# Convert data to TensorFlow datasets
+train_ds = tfdf.keras.pd_dataframe_to_tf_dataset(
+    preprocessed_train_df, label="Survived").map(tokenize_names)
+serving_ds = tfdf.keras.pd_dataframe_to_tf_dataset(
+    preprocessed_serving_df).map(tokenize_names)
+
+# Create and train the model
+model = tfdf.keras.GradientBoostedTreesModel(
+    verbose=0,
+    features=[tfdf.keras.FeatureUsage(name=n) for n in input_features],
+    exclude_non_specified_features=True,
+    random_seed=1234
+)
+model.fit(train_ds)
+
+# Model evaluation
+self_evaluation = model.make_inspector().evaluation()
+print(f"Accuracy: {self_evaluation.accuracy} Loss: {self_evaluation.loss}")
+
+# Function to convert predictions to Kaggle format
+def prediction_to_kaggle_format(model, threshold=0.5):
     proba_survive = model.predict(serving_ds, verbose=0)[:, 0]
     return pd.DataFrame({
         "PassengerId": serving_df["PassengerId"],
-        "Survived": (proba_survive >= 0.5).astype(int)
+        "Survived": (proba_survive >= threshold).astype(int)
     })
 
-if __name__ == "__main__":
-    print(f"Found TF-DF {tfdf.__version__}")
-    
-    # Read data from CSV files
-    train_df = pd.read_csv(TRAIN_CSV_PATH)
-    serving_df = pd.read_csv(TEST_CSV_PATH)
-    
-    # Preprocess data
-    preprocessed_train_df = preprocess_data(train_df)
-    preprocessed_serving_df = preprocess_data(serving_df)
-    
-    input_features = list(preprocessed_train_df.columns)
-    input_features.remove("Ticket")
-    input_features.remove("PassengerId")
-    input_features.remove("Survived")
-    
-    # Convert data to TensorFlow datasets
-    train_ds = tfdf.keras.pd_dataframe_to_tf_dataset(preprocessed_train_df, label="Survived")
-    serving_ds = tfdf.keras.pd_dataframe_to_tf_dataset(preprocessed_serving_df)
-    
-    # Train the model
-    trained_model = train_model(train_ds)
-    
-    # Make predictions
-    kaggle_predictions = make_predictions(trained_model, serving_ds)
-    
-    # Export submission
-    kaggle_predictions.to_csv(SUBMISSION_PATH, index=False)
-    print(f"Submission exported to {SUBMISSION_PATH}")
+# Make predictions and save to submission.csv
+kaggle_predictions = prediction_to_kaggle_format(model)
+kaggle_predictions.to_csv("submission.csv", index=False)
+print("Submission exported to submission.csv")
