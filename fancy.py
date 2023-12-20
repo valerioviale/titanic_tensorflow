@@ -24,9 +24,9 @@ class Calculator:
         # Add a name to our application
         master.title("Python Calculator")
         # Create a line where we display the equation
-        self.equation = Entry(master, width=40, borderwidth=2)
+        self.equation = Entry(master, width=26, borderwidth=10)
         # Assign a position for the equation line in the grey application window
-        self.equation.grid(row=0, column=0, columnspan=4, padx=5, pady=8)
+        self.equation.grid(row=0, column=0, columnspan=4, padx=2, pady=8)
         # Execute the .createButton() method
         self.createButton()
 
@@ -81,7 +81,8 @@ class Calculator:
         return Button(
             self.master,
             text=value,
-            width=7,
+            width=3,
+            height=3,
             command=lambda: self.clickButton(str(value)),
         )
 
